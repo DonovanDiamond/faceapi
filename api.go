@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"log"
 	"os"
 	"path/filepath"
@@ -38,14 +39,19 @@ func (a *FaceAPI) init() (err error) {
 
 	app.Post("/recognize", func(c *fiber.Ctx) error {
 		var d struct {
-			Data []byte `json:"data"`
+			Data string `json:"data"`
 		}
 
 		if err := c.BodyParser(&d); err != nil {
 			return errors.Wrap(err, "failed to parse body")
 		}
 
-		id, err := a.recognize(d.Data)
+		raw, err := base64.StdEncoding.DecodeString(d.Data)
+		if err != nil {
+			return errors.Wrap(err, "failed to decode base64")
+		}
+
+		id, err := a.recognize(raw)
 		return c.JSON(fiber.Map{
 			"id":    id,
 			"error": err,
