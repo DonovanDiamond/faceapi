@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	face "github.com/Kagami/go-face"
 	"github.com/gofiber/fiber/v2"
@@ -39,7 +42,8 @@ func (a *FaceAPI) init() (err error) {
 
 	app.Post("/recognize", func(c *fiber.Ctx) error {
 		var d struct {
-			Data string `json:"data"`
+			Data     string `json:"data"`
+			Multiple bool   `json:"multiple"`
 		}
 
 		if err := c.BodyParser(&d); err != nil {
@@ -51,9 +55,52 @@ func (a *FaceAPI) init() (err error) {
 			return errors.Wrap(err, "failed to decode base64")
 		}
 
-		id, err := a.recognize(raw)
+		var results []int
+		if d.Multiple {
+			results, err = a.recongizeMultiple(raw)
+		} else {
+			results = append(results, 0)
+			results[0], err = a.recognize(raw)
+		}
+
 		return c.JSON(fiber.Map{
-			"id":    id,
+			"results": results,
+			"error":   err,
+		})
+	})
+
+	app.Post("/add", func(c *fiber.Ctx) error {
+		var d struct {
+			Data string `json:"data"`
+			ID   int    `json:"id"`
+		}
+
+		if err := c.BodyParser(&d); err != nil {
+			return errors.Wrap(err, "failed to parse body")
+		}
+
+		raw, err := base64.StdEncoding.DecodeString(d.Data)
+		if err != nil {
+			return errors.Wrap(err, "failed to decode base64")
+		}
+
+		filename := fmt.Sprintf("%d-%d.jpg", d.ID, time.Now().Unix())
+
+		err = os.WriteFile(filepath.Join(trainingDir, filename), raw, fs.ModeAppend)
+		if err != nil {
+			return errors.Wrap(err, "failed to write output file")
+		}
+
+		return c.JSON(fiber.Map{
+			"filename": filename,
+			"id":       d.ID,
+		})
+	})
+
+	app.Post("/train", func(c *fiber.Ctx) error {
+		err := a.train()
+
+		return c.JSON(fiber.Map{
 			"error": err,
 		})
 	})
@@ -107,4 +154,17 @@ func (a *FaceAPI) recognize(data []byte) (result int, err error) {
 	}
 	id := a.rec.Classify(face.Descriptor)
 	return id, nil
+}
+
+func (a *FaceAPI) recongizeMultiple(data []byte) (results []int, err error) {
+	faces, err := a.rec.Recognize(data)
+	if err != nil {
+		err = errors.Wrap(err, "failed to recongize face")
+	}
+
+	for _, face := range faces {
+		results = append(results, a.rec.Classify(face.Descriptor))
+	}
+
+	return
 }
