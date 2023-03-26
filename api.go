@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	face "github.com/Kagami/go-face"
@@ -84,7 +83,7 @@ func (a *FaceAPI) init() (err error) {
 			return errors.Wrap(err, "failed to decode base64")
 		}
 
-		filename := fmt.Sprintf("%d-%d.jpg", d.ID, time.Now().Unix())
+		filename := fmt.Sprintf("%d/%d.jpg", d.ID, time.Now().Unix())
 
 		err = os.WriteFile(filepath.Join(trainingDir, filename), raw, fs.ModeAppend)
 		if err != nil {
@@ -116,28 +115,44 @@ func (a *FaceAPI) init() (err error) {
 }
 
 func (a *FaceAPI) train() (err error) {
-	files, err := os.ReadDir(trainingDir)
+	folders, err := os.ReadDir(trainingDir)
 	if err != nil {
 		return errors.Wrap(err, "failed to read training dir")
 	}
 	var samples []face.Descriptor
 	var cats []int32
-	for _, file := range files {
-		face, err := a.rec.RecognizeSingleFile(filepath.Join(trainingDir, file.Name()))
+
+	for _, folder := range folders {
+		folderPath := filepath.Join(trainingDir, folder.Name())
+		files, err := os.ReadDir(folderPath)
 		if err != nil {
-			return errors.Wrapf(err, "failed to recognize file %s", file.Name())
-		}
-		if face == nil {
-			log.Printf("could not find face on %s", file.Name())
+			log.Printf("could not read folder %s", folderPath)
+			log.Println(err)
 			continue
 		}
-		id, err := strconv.Atoi(strings.Split(file.Name(), "-")[0])
+		personID, err := strconv.Atoi(folder.Name())
 		if err != nil {
-			return errors.Wrap(err, "failed to parse file name")
+			log.Printf("could not parse folder name %s", folderPath)
+			log.Println(err)
+			continue
 		}
-		cats = append(cats, int32(id))
-		samples = append(samples, face.Descriptor)
-		log.Printf("\t training %s...", file.Name())
+
+		for _, file := range files {
+			imagePath := filepath.Join(folderPath, file.Name())
+			face, err := a.rec.RecognizeSingleFile(imagePath)
+			if err != nil {
+				log.Printf("could not recognize file %s", imagePath)
+				log.Println(err)
+				continue
+			}
+			if face == nil {
+				log.Printf("could not find face on %s", imagePath)
+				continue
+			}
+			cats = append(cats, int32(personID))
+			samples = append(samples, face.Descriptor)
+			log.Printf("\t training %s...", imagePath)
+		}
 	}
 	a.rec.SetSamples(samples, cats)
 	return
