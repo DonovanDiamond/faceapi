@@ -76,17 +76,21 @@ func (a *FaceAPI) train() (err error) {
 	var samples []face.Descriptor
 	var cats []int32
 	for _, file := range files {
-		log.Printf("\t training %s...", file.Name())
-		faces, err := a.rec.RecognizeFile(filepath.Join(trainingDir, file.Name()))
+		face, err := a.rec.RecognizeSingleFile(filepath.Join(trainingDir, file.Name()))
 		if err != nil {
 			return errors.Wrapf(err, "failed to recognize file %s", file.Name())
 		}
-		if len(faces) != 1 {
-			return errors.Wrapf(err, "there isnt 1 face on %s", file.Name())
+		if face == nil {
+			log.Printf("could not find face on %s", file.Name())
+			continue
 		}
-		id, _ := strconv.Atoi(strings.Split(file.Name(), "-")[0])
+		id, err := strconv.Atoi(strings.Split(file.Name(), "-")[0])
+		if err != nil {
+			return errors.Wrap(err, "failed to parse file name")
+		}
 		cats = append(cats, int32(id))
-		samples = append(samples, faces[0].Descriptor)
+		samples = append(samples, face.Descriptor)
+		log.Printf("\t training %s...", file.Name())
 	}
 	a.rec.SetSamples(samples, cats)
 	return
