@@ -19,8 +19,10 @@ import (
 const dataDir = "data"
 
 var (
-	modelsDir   = filepath.Join(dataDir, "models")
-	trainingDir = filepath.Join(dataDir, "training")
+	modelsDir                = filepath.Join(dataDir, "models")
+	trainingDir              = filepath.Join(dataDir, "training")
+	defaultUseCNN            = true
+	defaultThreshold float32 = 0.6
 )
 
 type FaceAPI struct {
@@ -35,14 +37,18 @@ func (a *FaceAPI) init() (err error) {
 	}
 
 	log.Println("Creating router...")
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		BodyLimit: 1024 * 1024 * 1024, // 1GB
+	})
 
 	app.Use(logger.New())
 
 	app.Post("/recognize", func(c *fiber.Ctx) error {
 		var d struct {
-			Data     string `json:"data"`
-			Multiple bool   `json:"multiple"`
+			Data      string   `json:"data"`
+			Multiple  bool     `json:"multiple"`
+			Threshold *float32 `json:"threshold"`
+			UseCNN    *bool    `json:"cnn"`
 		}
 
 		if err := c.BodyParser(&d); err != nil {
@@ -54,12 +60,19 @@ func (a *FaceAPI) init() (err error) {
 			return errors.Wrap(err, "failed to decode base64")
 		}
 
+		if d.Threshold == nil {
+			d.Threshold = &defaultThreshold
+		}
+		if d.UseCNN == nil {
+			d.UseCNN = &defaultUseCNN
+		}
+
 		var results []int
 		if d.Multiple {
-			results, err = a.recongizeMultiple(raw)
+			results, err = a.recongizeMultiple(raw, *d.UseCNN, *d.Threshold)
 		} else {
 			results = append(results, 0)
-			results[0], err = a.recognize(raw)
+			results[0], err = a.recognize(raw, *d.UseCNN, *d.Threshold)
 		}
 
 		return c.JSON(fiber.Map{
@@ -137,7 +150,10 @@ func (a *FaceAPI) train() (err error) {
 			continue
 		}
 
-		for _, file := range files {
+		for i, file := range files {
+			if i > 0 {
+				continue
+			}
 			imagePath := filepath.Join(folderPath, file.Name())
 			face, err := a.rec.RecognizeSingleFile(imagePath)
 			if err != nil {
@@ -158,8 +174,13 @@ func (a *FaceAPI) train() (err error) {
 	return
 }
 
-func (a *FaceAPI) recognize(data []byte) (result int, err error) {
-	face, err := a.rec.RecognizeSingle(data)
+func (a *FaceAPI) recognize(data []byte, useCNN bool, threshold float32) (result int, err error) {
+	var face *face.Face
+	if useCNN {
+		face, err = a.rec.RecognizeSingleCNN(data)
+	} else {
+		face, err = a.rec.RecognizeSingle(data)
+	}
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to recongize face")
 	}
@@ -167,18 +188,23 @@ func (a *FaceAPI) recognize(data []byte) (result int, err error) {
 	if face == nil {
 		return 0, errors.Wrap(err, "no face on image")
 	}
-	id := a.rec.Classify(face.Descriptor)
+	id := a.rec.ClassifyThreshold(face.Descriptor, threshold)
 	return id, nil
 }
 
-func (a *FaceAPI) recongizeMultiple(data []byte) (results []int, err error) {
-	faces, err := a.rec.Recognize(data)
+func (a *FaceAPI) recongizeMultiple(data []byte, useCNN bool, threshold float32) (results []int, err error) {
+	var faces []face.Face
+	if useCNN {
+		faces, err = a.rec.RecognizeCNN(data)
+	} else {
+		faces, err = a.rec.Recognize(data)
+	}
 	if err != nil {
 		err = errors.Wrap(err, "failed to recongize face")
 	}
 
 	for _, face := range faces {
-		results = append(results, a.rec.Classify(face.Descriptor))
+		results = append(results, a.rec.ClassifyThreshold(face.Descriptor, threshold))
 	}
 
 	return
