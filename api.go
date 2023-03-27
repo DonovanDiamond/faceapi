@@ -71,7 +71,7 @@ func (a *FaceAPI) init() (err error) {
 	app.Post("/add", func(c *fiber.Ctx) error {
 		var d struct {
 			Data string `json:"data"`
-			ID   int    `json:"id"`
+			ID   string `json:"id"`
 		}
 
 		if err := c.BodyParser(&d); err != nil {
@@ -83,8 +83,16 @@ func (a *FaceAPI) init() (err error) {
 			return errors.Wrap(err, "failed to decode base64")
 		}
 
-		filename := fmt.Sprintf("%d/%d.jpg", d.ID, time.Now().Unix())
+		filename := fmt.Sprintf("%s/%d.jpg", d.ID, time.Now().Unix())
 
+		if _, err := os.Stat(filepath.Join(trainingDir, d.ID)); errors.Is(err, os.ErrNotExist) {
+			log.Println("Creating Directory...")
+			err := os.Mkdir(filepath.Join(trainingDir, d.ID), os.ModePerm)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+		
 		err = os.WriteFile(filepath.Join(trainingDir, filename), raw, fs.ModeAppend)
 		if err != nil {
 			return errors.Wrap(err, "failed to write output file")
